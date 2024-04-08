@@ -1586,7 +1586,7 @@ inline int array_container_rank(const array_container_t *arr, uint16_t x) {
     }
 }
 
-/* Returns the index of the first value equal or smaller than x, or -1 */
+/* Returns the index of the first value equal or larger than x, or -1 */
 inline int array_container_index_equalorlarger(const array_container_t *arr, uint16_t x) {
     const int32_t idx = binarySearch(arr->array, arr->cardinality, x);
     const bool is_present = idx >= 0;
@@ -1595,6 +1595,19 @@ inline int array_container_index_equalorlarger(const array_container_t *arr, uin
     } else {
         int32_t candidate = - idx - 1;
         if(candidate < arr->cardinality) return candidate;
+        return -1;
+    }
+}
+
+/* Returns the index of the first value equal or smaller than x, or -1 */
+inline int array_container_index_equalorsmaller(const array_container_t *arr, uint16_t x) {
+    const int32_t idx = binarySearch(arr->array, arr->cardinality, x);
+    const bool is_present = idx >= 0;
+    if (is_present) {
+        return idx;
+    } else {
+        int32_t candidate = - idx - 2;
+        if(candidate < arr->cardinality && candidate >= 0) return candidate;
         return -1;
     }
 }
@@ -2741,6 +2754,16 @@ inline int run_container_index_equalorlarger(const run_container_t *arr, uint16_
       return index;
     }
     return -1;
+}
+
+/* Returns the index of the first run containing a value at most as large as x, or -1 */
+inline int run_container_index_equalorsmaller(const run_container_t *arr, uint16_t x) {
+    int32_t index = interleavedBinarySearch(arr->runs, arr->n_runs, x);
+    if (index >= 0) {
+        return index;
+    } else {
+        return -index - 2; // points to preceding run, possibly -1
+    }
 }
 
 /*

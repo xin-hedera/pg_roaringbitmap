@@ -2902,6 +2902,7 @@ void bitset_flip_list(void *bitset, const uint16_t *list, uint64_t length) {
 extern inline uint16_t array_container_minimum(const array_container_t *arr);
 extern inline uint16_t array_container_maximum(const array_container_t *arr);
 extern inline int array_container_index_equalorlarger(const array_container_t *arr, uint16_t x);
+extern inline int array_container_index_equalorsmaller(const array_container_t *arr, uint16_t x);
 
 extern inline int array_container_rank(const array_container_t *arr,
                                        uint16_t x);
@@ -4106,6 +4107,21 @@ int bitset_container_index_equalorlarger(const bitset_container_t *container, ui
     word = container->array[k];
   }
   return k * 64 + __builtin_ctzll(word);
+}
+
+/* Returns the index of the first value equal or smaller than x, or -1 */
+int bitset_container_index_equalorsmaller(const bitset_container_t *container, uint16_t x) {
+  uint32_t x32 = x;
+  uint32_t k = x32 / 64;
+  uint64_t word = container->array[k];
+  const int diff = 63 - (x32 - k * 64); // in [0,64)
+  word = (word << diff) >> diff; // a mask is faster, but we don't care
+  while(word == 0) {
+    k--;
+    if(k == BITSET_CONTAINER_SIZE_IN_WORDS) return -1;
+    word = container->array[k];
+  }
+  return k * 64 + 63 - __builtin_clzll(word);
 }
 /* end file src/containers/bitset.c */
 /* begin file src/containers/containers.c */
@@ -6712,6 +6728,7 @@ extern inline int32_t interleavedBinarySearch(const rle16_t *array,
 extern inline bool run_container_contains(const run_container_t *run,
                                           uint16_t pos);
 extern inline int run_container_index_equalorlarger(const run_container_t *arr, uint16_t x);
+extern inline int run_container_index_equalorsmaller(const run_container_t *arr, uint16_t x);
 extern inline bool run_container_is_full(const run_container_t *run);
 extern inline bool run_container_nonzero_cardinality(const run_container_t *r);
 extern inline void run_container_clear(run_container_t *run);
@@ -9094,6 +9111,39 @@ static bool loadfirstvalue_largeorequal(roaring_uint32_iterator_t *newit, uint32
     return true;
 }
 
+static bool loadfirstvalue_equalorsmaller(roaring_uint32_iterator_t *newit, uint32_t val) {
+    // Don't have to check return value because of prerequisite
+    iter_new_container_partial_init(newit);
+    uint16_t lb = val & 0xFFFF;
+
+    switch (newit->typecode) {
+        case BITSET_CONTAINER_TYPE_CODE:
+            newit->in_container_index =  bitset_container_index_equalorsmaller((const bitset_container_t *)(newit->container), lb);
+            newit->current_value = newit->highbits | newit->in_container_index;
+            break;
+        case ARRAY_CONTAINER_TYPE_CODE:
+            newit->in_container_index = array_container_index_equalorsmaller((const array_container_t *)(newit->container), lb);
+            newit->current_value =
+                newit->highbits |
+                ((const array_container_t *)(newit->container))->array[newit->in_container_index];
+            break;
+        case RUN_CONTAINER_TYPE_CODE:
+            newit->run_index = run_container_index_equalorsmaller((const run_container_t *)(newit->container), lb);
+            const rle16_t * run = &((const run_container_t *)(newit->container))->runs[newit->run_index];
+            const uint16_t last_value = run->value + run->length;
+            if(last_value >= lb) {
+              newit->current_value = val;
+            } else {
+              newit->current_value = newit->highbits | last_value;
+            }
+            break;
+        default:
+            // if this ever happens, bug!
+            assert(false);
+    }  // switch (typecode)
+    return true;
+}
+
 void roaring_init_iterator(const roaring_bitmap_t *ra,
                            roaring_uint32_iterator_t *newit) {
     newit->parent = ra;
@@ -9145,6 +9195,27 @@ bool roaring_move_uint32_iterator_equalorlarger(roaring_uint32_iterator_t *it, u
     return it->has_value;
 }
 
+bool roaring_move_uint32_iterator_equalorsmaller(roaring_uint32_iterator_t *it, uint32_t val) {
+    uint16_t hb = val >> 16;
+    const int i = ra_get_index(& it->parent->high_low_container, hb);
+    if (i >= 0) {
+      uint32_t lowerbound = container_minimum(it->parent->high_low_container.containers[i], it->parent->high_low_container.typecodes[i]);
+    //   uint32_t lowvalue = container_maximum(it->parent->high_low_container.containers[i], it->parent->high_low_container.typecodes[i]);
+      uint16_t lb = val & 0xFFFF;
+      if(lowerbound > lb ) {
+        it->container_index = i-1; // will have to load last value of previous container
+      } else {// the value is necessarily within the range of the container
+        it->container_index = i;
+        it->has_value = loadfirstvalue_equalorsmaller(it, val);
+        return it->has_value;
+      }
+    } else {
+      // there is no matching, so we are going for the previous container
+      it->container_index = -i-2;
+    }
+    it->has_value = loadlastvalue(it);
+    return it->has_value;
+}
 
 bool roaring_advance_uint32_iterator(roaring_uint32_iterator_t *it) {
     if (it->container_index >= it->parent->high_low_container.size) {
