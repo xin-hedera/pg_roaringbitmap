@@ -1481,8 +1481,8 @@ rb_select(PG_FUNCTION_ARGS) {
 
     if (limit > 0) {
         roaring_init_iterator(r1, &iterator);
-        roaring_move_uint32_iterator_equalorlarger(&iterator, rangestart);
         if (!reverse) {
+            roaring_move_uint32_iterator_equalorlarger(&iterator, rangestart);
             while (iterator.has_value) {
                 if (iterator.current_value >= rangeend
                         || count - offset >= limit)
@@ -1494,31 +1494,16 @@ rb_select(PG_FUNCTION_ARGS) {
                 count++;
             }
         } else {
+            uint32_t inclusive_end = (uint32_t) (rangeend - 1);
+            roaring_move_uint32_iterator_equalorsmaller(&iterator, inclusive_end);
             while (iterator.has_value) {
-                if (iterator.current_value >= rangeend)
-                    break;
-                roaring_advance_uint32_iterator(&iterator);
-                total_count++;
-            }
-
-            if (total_count > offset) {
-                /* calulate new offset for reverse */
-                offset = total_count - offset - limit;
-                if(offset < 0)
-                    offset = 0;
-                roaring_init_iterator(r1, &iterator);
-                roaring_move_uint32_iterator_equalorlarger(&iterator,rangestart);
-                count = 0;
-                while (iterator.has_value) {
-                    if (iterator.current_value >= rangeend
-                            || count - offset >= limit)
-                        break;
-                    if (count >= offset) {
-                        roaring_bitmap_add(r2, iterator.current_value);
-                    }
-                    roaring_advance_uint32_iterator(&iterator);
-                    count++;
+                if (iterator.current_value < rangestart || count - offset >= limit)
+                  break;
+                if (count >= offset) {
+                    roaring_bitmap_add(r2, iterator.current_value);
                 }
+                roaring_previous_uint32_iterator(&iterator);
+                count++;
             }
         }
     }
