@@ -1450,7 +1450,6 @@ rb_select(PG_FUNCTION_ARGS) {
     int64 rangestart = PG_GETARG_INT64(4);
     int64 rangeend = PG_GETARG_INT64(5);
     int64 count = 0;
-    int64 total_count = 0;
     roaring_bitmap_t *r1;
     roaring_bitmap_t *r2;
     roaring_uint32_iterator_t iterator;
