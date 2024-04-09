@@ -1494,13 +1494,18 @@ rb_select(PG_FUNCTION_ARGS) {
             }
         } else {
             uint32_t inclusive_end = (uint32_t) (rangeend - 1);
-            roaring_move_uint32_iterator_equalorsmaller(&iterator, inclusive_end);
+            roaring_move_uint32_iterator_equalorlarger(&iterator, inclusive_end);
+            if (!iterator.has_value || iterator.current_value > inclusive_end) {
+                roaring_previous_uint32_iterator(&iterator);
+            }
+
             while (iterator.has_value) {
                 if (iterator.current_value < rangestart || count - offset >= limit)
                   break;
                 if (count >= offset) {
                     roaring_bitmap_add(r2, iterator.current_value);
                 }
+
                 roaring_previous_uint32_iterator(&iterator);
                 count++;
             }
