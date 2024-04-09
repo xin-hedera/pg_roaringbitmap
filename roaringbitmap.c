@@ -1460,7 +1460,6 @@ rb_select(PG_FUNCTION_ARGS) {
     int64 rangestart = PG_GETARG_INT64(4);
     int64 rangeend = PG_GETARG_INT64(5);
     int64 count = 0;
-    int64 total_count = 0;
     roaring_bitmap_t *r1;
     roaring_bitmap_t *r2;
     roaring_uint32_iterator_t iterator;
@@ -1504,31 +1503,22 @@ rb_select(PG_FUNCTION_ARGS) {
                 count++;
             }
         } else {
-            while (iterator.has_value) {
-                if (iterator.current_value >= rangeend)
-                    break;
-                roaring_uint32_iterator_advance(&iterator);
-                total_count++;
+            uint32_t inclusive_end = (uint32_t) (rangeend - 1);
+            roaring_uint32_iterator_move_equalorlarger(&iterator, inclusive_end);
+            if (!iterator.has_value || iterator.current_value > inclusive_end) {
+                roaring_uint32_iterator_previous(&iterator);
             }
 
-            if (total_count > offset) {
-                /* calulate new offset for reverse */
-                offset = total_count - offset - limit;
-                if(offset < 0)
-                    offset = 0;
-                roaring_iterator_init(r1, &iterator);
-                roaring_uint32_iterator_move_equalorlarger(&iterator,rangestart);
-                count = 0;
-                while (iterator.has_value) {
-                    if (iterator.current_value >= rangeend
-                            || count - offset >= limit)
-                        break;
-                    if (count >= offset) {
-                        roaring_bitmap_add(r2, iterator.current_value);
-                    }
-                    roaring_uint32_iterator_advance(&iterator);
-                    count++;
+            while (iterator.has_value) {
+                if (iterator.current_value < rangestart || count - offset >= limit) {
+                    break;
                 }
+
+                if (count >= offset) {
+                    roaring_bitmap_add(r2, iterator.current_value);
+                }
+                roaring_uint32_iterator_previous(&iterator);
+                count++;
             }
         }
     }
